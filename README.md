@@ -33,7 +33,7 @@ This MCP server can be added to just about any agent with an appropriate command
 
 - **Document Management**
   - ✅ Create new documents with customizable properties
-  - ✅ Get document details
+  - ✅ Get document details (with optional file output)
   - ✅ Update existing documents
   - ✅ Delete documents
   - ✅ List documents
