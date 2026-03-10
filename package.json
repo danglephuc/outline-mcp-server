@@ -19,7 +19,7 @@
     "url": "https://github.com/mmmeff/outline-mcp-server"
   },
   "scripts": {
-    "build": "node --input-type=module -e \"import { rmSync } from 'node:fs'; rmSync('build', { recursive: true, force: true });\" && tsc && chmod +x build/index.js && chmod +x build/stdio.js",
+    "build": "node --input-type=module -e \"import { rmSync } from 'node:fs'; rmSync('build', { recursive: true, force: true });\" && tsc && node --input-type=module -e \"import { chmodSync } from 'node:fs'; import { platform } from 'node:os'; if (platform() !== 'win32') { chmodSync('build/index.js', 0o755); chmodSync('build/stdio.js', 0o755); }\"",
     "build:dxt": "./scripts/build-dxt.sh",
     "prepare": "npm run build",
     "watch": "npm run build && concurrently -n build,run -c blue.bold,green.bold \"tsc --watch --preserveWatchOutput\" \"node --watch build/index.js\"",
@@ -47,6 +47,7 @@
     "dotenv-cli": "11.x",
     "prettier": "3.x",
     "semantic-release": "25.x",
+    "tsx": "^4.21.0",
     "typescript": "5.x"
   },
   "keywords": [

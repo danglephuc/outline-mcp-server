@@ -12,7 +12,7 @@ toolRegistry.register('list_comments', {
     includeAnchorText: z
       .boolean()
       .describe(
-        'Include the highlighted document text that the comment is anchored to (default true)',
+        'Include the highlighted document text that the comment is anchored to (default true)'
       )
       .optional(),
     limit: z.number().describe('Maximum number of comments to return (default 25)').optional(),
