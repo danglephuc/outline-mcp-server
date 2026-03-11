@@ -25,7 +25,7 @@ toolRegistry.register('get_document', {
       })
       .optional()
       .describe(
-        'Optional absolute file path within OUTLINE_OUTPUT_BASE_DIR to save the document as YAML frontmatter + Markdown body, reducing LLM context size.'
+        'Optional absolute file path to save the document as YAML frontmatter + Markdown body, reducing LLM context size.'
       ),
   },
   async callback(args) {
@@ -44,23 +44,7 @@ toolRegistry.register('get_document', {
       const data = response.data.data;
 
       if (args.outputPath) {
-        const outputBaseDir = process.env.OUTLINE_OUTPUT_BASE_DIR;
-        if (!outputBaseDir) {
-          throw new McpError(
-            ErrorCode.InvalidRequest,
-            'File output requires the OUTLINE_OUTPUT_BASE_DIR environment variable to be configured'
-          );
-        }
-
         const resolvedOutput = path.resolve(args.outputPath);
-        const resolvedBase = path.resolve(outputBaseDir);
-
-        if (!resolvedOutput.startsWith(resolvedBase + path.sep)) {
-          throw new McpError(
-            ErrorCode.InvalidRequest,
-            `outputPath must be within the configured OUTLINE_OUTPUT_BASE_DIR (${resolvedBase})`
-          );
-        }
 
         // Only include essential metadata fields
         const essentialFields = [
