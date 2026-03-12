@@ -3,6 +3,7 @@ import path from 'node:path';
 import { type AxiosInstance } from 'axios';
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import { getOutlineClient } from '../outline/outlineClient.js';
+import { formatPosixRelativeMarkdownPath } from '../utils/linkPaths.js';
 import toolRegistry from '../utils/toolRegistry.js';
 import z from 'zod';
 
@@ -193,6 +194,28 @@ async function resolveLinks(
     'g'
   );
 
+  const tryResolveToLocalLink = (sourceFilePath: string, docLink: string): string | undefined => {
+    // Fast path: exact key match
+    const exact = urlMap.get(docLink);
+    if (exact) return formatPosixRelativeMarkdownPath(sourceFilePath, exact);
+
+    // Normalize the link once and try a small set of stable lookup keys.
+    // - absolute href (covers relative /doc/... + baseUrl and already-absolute URLs)
+    // - pathname (covers "/doc/..." which is what we store from doc.url)
+    try {
+      const u = new URL(docLink, baseUrl);
+      const byHref = urlMap.get(u.href);
+      if (byHref) return formatPosixRelativeMarkdownPath(sourceFilePath, byHref);
+
+      const byPath = urlMap.get(u.pathname);
+      if (byPath) return formatPosixRelativeMarkdownPath(sourceFilePath, byPath);
+    } catch {
+      // Not a valid URL; nothing else to try here.
+    }
+
+    return undefined;
+  };
+
   for (const { filePath, content } of savedFiles) {
     // Only resolve links in the markdown body, not in YAML frontmatter
     let frontmatter = '';
@@ -206,37 +229,21 @@ async function resolveLinks(
     let fileResolved = 0;
 
     const updated = body.replace(pattern, (match, slugOrId: string) => {
-      // Try exact match on the full matched URL
-      if (urlMap.has(match)) {
+      const resolved = tryResolveToLocalLink(filePath, match);
+      if (resolved) {
         fileResolved++;
-        return path.relative(path.dirname(filePath), urlMap.get(match)!);
+        return resolved;
       }
 
-      // Try with baseUrl prefix if the match is relative
-      const fullUrl = match.startsWith('/') ? `${baseUrl}${match}` : match;
-      if (urlMap.has(fullUrl)) {
+      // Back-compat: some content may contain direct IDs (UUID or urlId) without /doc/.
+      // Our regex captures the urlId portion; keep this lookup in case urlMap contains it.
+      const byId = urlMap.get(slugOrId);
+      if (byId) {
         fileResolved++;
-        return path.relative(path.dirname(filePath), urlMap.get(fullUrl)!);
+        return formatPosixRelativeMarkdownPath(filePath, byId);
       }
 
-      // Try the path portion
-      try {
-        const urlPath = new URL(match, 'http://dummy').pathname;
-        if (urlMap.has(urlPath)) {
-          fileResolved++;
-          return path.relative(path.dirname(filePath), urlMap.get(urlPath)!);
-        }
-      } catch {
-        // not a valid URL, skip
-      }
-
-      // Try matching by just the captured slug/id (could be a UUID)
-      if (urlMap.has(slugOrId)) {
-        fileResolved++;
-        return path.relative(path.dirname(filePath), urlMap.get(slugOrId)!);
-      }
-
-      return match; // no replacement found
+      return match;
     });
 
     if (fileResolved > 0) {

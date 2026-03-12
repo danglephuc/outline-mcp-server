@@ -424,16 +424,18 @@ function normalizePath(filePath: string): string {
   return path.resolve(filePath);
 }
 
-function deriveBaseUrl(): string {
-  const apiUrl = process.env.OUTLINE_API_URL || 'https://app.getoutline.com/api';
-  return apiUrl.replace(/\/api\/?$/, '');
-}
-
-function toAbsoluteDocUrl(urlOrPath: string, baseUrl: string): string {
+function toDocPath(urlOrPath: string): string {
   const u = String(urlOrPath || '').trim();
   if (!u) return u;
-  if (u.startsWith('http://') || u.startsWith('https://')) return u;
-  if (u.startsWith('/')) return `${baseUrl}${u}`;
+  if (u.startsWith('/doc/')) return u;
+  if (u.startsWith('http://') || u.startsWith('https://')) {
+    try {
+      return new URL(u).pathname;
+    } catch {
+      return u;
+    }
+  }
+  if (u.startsWith('/')) return u;
   return u;
 }
 
@@ -441,11 +443,10 @@ function convertLocalLinksToCloud(
   text: string,
   sourceFilePath: string,
   cloudUrlByFile: Map<string, string>,
-  baseUrl: string
 ): string {
   const markdownLinkPattern = /(!?\[[^\]]*\])\(([^)]+)\)/g;
 
-  return text.replace(markdownLinkPattern, (fullMatch, label, rawTarget) => {
+  const convertedMarkdownLinks = text.replace(markdownLinkPattern, (fullMatch, label, rawTarget) => {
     let target = String(rawTarget).trim();
 
     if (!target) return fullMatch;
@@ -482,8 +483,47 @@ function convertLocalLinksToCloud(
 
     if (!cloudUrl) return fullMatch;
 
-    const absoluteCloudUrl = toAbsoluteDocUrl(cloudUrl, baseUrl);
-    return `${label}(${absoluteCloudUrl}${targetHash})`;
+    // When pushing to Outline, we only need the doc path (no domain).
+    const docPath = toDocPath(cloudUrl);
+    return `${label}(${docPath}${targetHash})`;
+  });
+
+  // Second pass: convert bare relative `.md` references (not wrapped in Markdown link syntax).
+  // We only touch paths that start with ./, ../, .\, ..\ to avoid over-matching normal text.
+  //
+  // Examples matched:
+  // - ./Parent/Child.md
+  // - ../Sibling.md#heading
+  // - .\Parent\Child.md
+  const bareRelativeMdPattern = /(?<!\()(\.{1,2}[\\/][^\s)\]"']+?\.md)(#[^\s)\]"']+)?/gi;
+
+  return convertedMarkdownLinks.replace(bareRelativeMdPattern, (fullMatch, rawPath: string, rawHash: string) => {
+    const targetPath = String(rawPath).trim();
+    const targetHash = rawHash ? String(rawHash) : '';
+
+    if (!targetPath) return fullMatch;
+
+    const sourceDir = path.dirname(sourceFilePath);
+    const tryResolve = (p: string) => normalizePath(path.resolve(sourceDir, p));
+
+    let absTarget = tryResolve(targetPath);
+    let cloudUrl = cloudUrlByFile.get(absTarget);
+
+    if (!cloudUrl) {
+      // Same fallback as markdown conversion for duplicated current folder name.
+      const currentFolder = path.basename(sourceDir);
+      const normalizedTarget = targetPath.replace(/^[.][\\/]/, '').replace(/\\/g, '/');
+      const prefix = `${currentFolder}/`;
+      if (normalizedTarget.startsWith(prefix)) {
+        const withoutDup = normalizedTarget.slice(prefix.length);
+        absTarget = tryResolve(withoutDup);
+        cloudUrl = cloudUrlByFile.get(absTarget);
+      }
+    }
+
+    if (!cloudUrl) return fullMatch;
+
+    return `${toDocPath(cloudUrl)}${targetHash}`;
   });
 }
 
@@ -585,19 +625,19 @@ toolRegistry.register('sync_documents_to_cloud', {
       );
 
       if (syncLinksToCloud && !dryRun) {
-        const baseUrl = deriveBaseUrl();
         const allNodes = flattenTree(rootNode);
         const cloudUrlByFile = new Map<string, string>();
 
         for (const node of allNodes) {
           if (node.cloudUrl) {
-            cloudUrlByFile.set(normalizePath(node.filePath), toAbsoluteDocUrl(node.cloudUrl, baseUrl));
+            // Store as /doc/... path so uploads don't include a domain.
+            cloudUrlByFile.set(normalizePath(node.filePath), toDocPath(node.cloudUrl));
           }
         }
 
         for (const node of allNodes) {
           if (!node.cloudId) continue;
-          const converted = convertLocalLinksToCloud(node.body, node.filePath, cloudUrlByFile, baseUrl);
+          const converted = convertLocalLinksToCloud(node.body, node.filePath, cloudUrlByFile);
           if (converted === node.body) continue;
 
           const updatePayload = {
